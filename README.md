@@ -1,0 +1,205 @@
+# Sales AI Agent
+
+Agente de IA que analisa dados de vendas a partir de um arquivo CSV e responde perguntas em linguagem natural, utilizando **LangChain**, **LangGraph** e **OpenAI**.
+
+---
+
+## Arquitetura
+
+```
+sales-ai-agent/
+├── main.py                  # Entry-point (CLI / API / Streamlit)
+├── config/
+│   └── settings.py          # Pydantic Settings (env vars / .env)
+├── models/
+│   └── schemas.py           # Pydantic data models
+├── services/
+│   ├── data_loader.py       # CSV → pandas DataFrame (validado e enriquecido)
+│   └── analytics.py         # Serviço de analytics pré-construído
+├── agent/
+│   ├── csv_agent.py         # SalesAgent – facade do agente LangChain/LangGraph
+│   ├── tools.py             # LangChain Tools (analytics + Python REPL)
+│   └── prompts.py           # System prompts
+├── api/
+│   ├── app.py               # FastAPI application factory
+│   └── routes.py            # REST endpoints (/chat, /analytics/*)
+├── ui/
+│   └── streamlit_app.py     # Interface web Streamlit (chat + dashboard)
+├── sales.csv                # Dataset de vendas
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+└── .env.example
+```
+
+### Decisões Arquiteturais
+
+| Decisão | Justificativa |
+|---------|---------------|
+| **LangGraph ReAct Agent** | Agente com raciocínio iterativo (Thought → Action → Observation) para queries complexas |
+| **Custom Tools + Python REPL** | 12 ferramentas especializadas para consultas comuns + REPL para queries ad-hoc |
+| **3 interfaces** (CLI, API, Streamlit) | Flexibilidade: terminal para devs, API para integrações, Streamlit para stakeholders |
+| **Pydantic Settings** | Configuração type-safe via env vars, ideal para containers |
+| **Colunas derivadas** | `actual_revenue`, `quantity_diff`, etc. pré-computadas no load para performance |
+| **Separação de camadas** | Services ↔ Agent ↔ API desacoplados para testabilidade |
+
+---
+
+## Setup
+
+### Pré-requisitos
+
+- Python 3.11+
+- Uma chave de API da OpenAI
+
+### Instalação Local
+
+```bash
+# 1. Clone / entre na pasta do projeto
+cd sales-ai-agent
+
+# 2. Crie um ambiente virtual
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Linux/Mac
+source .venv/bin/activate
+
+# 3. Instale as dependências
+pip install -r requirements.txt
+
+# 4. Configure o ambiente
+cp .env.example .env
+# Edite o .env e insira sua OPENAI_API_KEY
+```
+
+### Executando
+
+#### CLI Interativo (padrão)
+```bash
+python main.py
+```
+
+#### API REST (FastAPI)
+```bash
+python main.py --api
+# Acesse: http://localhost:8000/docs
+```
+
+#### Interface Web (Streamlit)
+```bash
+python main.py --streamlit
+# Acesse: http://localhost:8501
+```
+
+---
+
+## Docker
+
+### Build e execução com Docker Compose
+
+```bash
+# Copie e configure o .env
+cp .env.example .env
+# Edite o .env com sua OPENAI_API_KEY
+
+# API + Streamlit
+docker compose up api streamlit
+
+# Apenas CLI interativo
+docker compose run --rm cli
+
+# Apenas a API
+docker compose up api
+```
+
+### Build manual
+
+```bash
+docker build -t sales-ai-agent .
+
+# CLI
+docker run -it --env-file .env -v ./sales.csv:/app/sales.csv:ro sales-ai-agent
+
+# API
+docker run -p 8000:8000 --env-file .env -v ./sales.csv:/app/sales.csv:ro sales-ai-agent --api
+
+# Streamlit
+docker run -p 8501:8501 --env-file .env -v ./sales.csv:/app/sales.csv:ro sales-ai-agent --streamlit
+```
+
+---
+
+## API Endpoints
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `POST` | `/api/v1/chat` | Enviar pergunta ao agente |
+| `GET`  | `/api/v1/analytics/overview` | Visão geral do dataset |
+| `GET`  | `/api/v1/analytics/top-products?n=10&by=quantity` | Top produtos |
+| `GET`  | `/api/v1/analytics/top-locations?n=10&by=revenue` | Top locais |
+| `GET`  | `/api/v1/analytics/promotions` | Impacto das promoções |
+| `GET`  | `/api/v1/analytics/planned-vs-actual` | Planejado vs realizado |
+| `GET`  | `/api/v1/analytics/service-level` | Estatísticas de nível de serviço |
+| `GET`  | `/health` | Health check |
+
+### Exemplo de chamada
+
+```bash
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Qual produto foi mais vendido?"}'
+```
+
+---
+
+## Ferramentas do Agente
+
+O agente possui **13 ferramentas** disponíveis:
+
+| Ferramenta | Descrição |
+|-----------|-----------|
+| `dataset_overview` | Visão geral: linhas, produtos, locais, período |
+| `top_products_by_quantity` | Top N produtos por quantidade vendida |
+| `top_locations_by_quantity` | Top N locais por quantidade vendida |
+| `top_products_by_revenue` | Top N produtos por receita |
+| `top_locations_by_revenue` | Top N locais por receita |
+| `total_sales_in_period` | Total de vendas em um período |
+| `monthly_sales_summary` | Resumo mensal de vendas |
+| `planned_vs_actual_summary` | Comparação planejado vs realizado |
+| `planned_vs_actual_by_product` | Diferença planejado vs realizado por produto |
+| `promotion_impact` | Impacto das promoções no preço e volume |
+| `service_level_stats` | Estatísticas do nível de serviço |
+| `service_level_by_location` | Nível de serviço por local |
+| `python_repl` | REPL Python/pandas para queries customizadas |
+
+---
+
+## Exemplos de Perguntas
+
+- "Qual produto foi mais vendido?"
+- "Qual local teve maior volume de vendas?"
+- "Qual foi o total de vendas em 2012?"
+- "Qual a diferença entre quantidade planejada e realizada?"
+- "Qual o impacto das promoções no preço e volume vendido?"
+- "Mostre o top 5 produtos por receita"
+- "Qual o nível de serviço médio por warehouse?"
+- "Compare as vendas do primeiro e segundo semestre de 2012"
+
+---
+
+## Dataset
+
+O arquivo `sales.csv` contém ~203k registros com as colunas:
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `product_id` | string | Identificador único do produto |
+| `local` | string | Local/warehouse da venda |
+| `date` | date | Data da venda (DD/MM/YYYY) |
+| `planned_quantity` | int | Quantidade planejada |
+| `actual_quantity` | int | Quantidade realmente vendida |
+| `planned_price` | float | Preço planejado |
+| `promotion_type` | string | Tipo de promoção (None, 1, 2, ...) |
+| `actual_price` | float | Preço real praticado |
+| `service_level` | float | Nível de serviço (0-1) |
