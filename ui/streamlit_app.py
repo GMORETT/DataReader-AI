@@ -118,6 +118,15 @@ with st.sidebar:
             st.session_state["pending_question"] = s
 
     st.divider()
+
+    st.markdown("##### Sessão")
+    agent = get_agent()
+    tracker = agent.tracker
+    st.markdown(f"Perguntas: **{tracker.total_queries}**")
+    st.markdown(f"Tokens: **{tracker.total_tokens_used:,}**")
+    st.markdown(f"Custo: **${tracker.total_cost_usd:.4f}**")
+
+    st.divider()
     st.caption("Powered by LangChain + OpenAI")
 
 
@@ -127,7 +136,11 @@ with st.sidebar:
 st.title("Data Reader AI Agent")
 st.caption("Faça perguntas sobre os dados em linguagem natural")
 
-tab_chat, tab_dashboard = st.tabs(["Chat", "Dashboard"])
+tab_chat, tab_dashboard, tab_trace = st.tabs([
+    "####  Chat",
+    "####  Dashboard",
+    "####  Tracking",
+])
 
 # ---------------------------------------------------------------------------
 # Tab: Chat
@@ -140,9 +153,20 @@ with tab_chat:
     if "pending_query" not in st.session_state:
         st.session_state.pending_query = None
 
+    if "traces" not in st.session_state:
+        st.session_state.traces = []
+
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+            if msg["role"] == "assistant" and msg.get("trace"):
+                t = msg["trace"]
+                st.caption(
+                    f"⏱ {t['total_duration_ms']:.0f}ms · "
+                    f"🔧 {len(t['tool_calls'])} tools · "
+                    f"📊 {t['tokens']['total']:,} tokens · "
+                    f"💰 ${t['estimated_cost_usd']:.4f}"
+                )
 
     if st.session_state.pending_query:
         query = st.session_state.pending_query
@@ -155,9 +179,22 @@ with tab_chat:
                     conversation_id=st.session_state.conversation_id,
                 )
                 answer = result["answer"]
+                trace = result["trace"]
+                trace_dict = trace.to_dict()
                 st.session_state.conversation_id = result["conversation_id"]
             st.markdown(answer)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
+            st.caption(
+                f"⏱ {trace_dict['total_duration_ms']:.0f}ms · "
+                f"🔧 {len(trace_dict['tool_calls'])} tools · "
+                f"📊 {trace_dict['tokens']['total']:,} tokens · "
+                f"💰 ${trace_dict['estimated_cost_usd']:.4f}"
+            )
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer,
+            "trace": trace_dict,
+        })
+        st.session_state.traces.append(trace_dict)
 
     pending = st.session_state.pop("pending_question", None)
     prompt = st.chat_input("Faça uma pergunta sobre os dados...") or pending
@@ -288,3 +325,50 @@ with tab_dashboard:
     )
     fig5.update_layout(**PLOTLY_LAYOUT, xaxis_title="Local", yaxis_title="Quantidade")
     st.plotly_chart(fig5, width="stretch")
+
+# ---------------------------------------------------------------------------
+# Tab: Traces (Observability)
+# ---------------------------------------------------------------------------
+with tab_trace:
+    traces = st.session_state.get("traces", [])
+
+    if not traces:
+        st.info("Nenhum trace ainda. Faça uma pergunta no Chat para ver os dados de observabilidade.")
+    else:
+        agent = get_agent()
+        tk = agent.tracker
+
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            st.metric("Total de Perguntas", tk.total_queries)
+        with tc2:
+            st.metric("Total de Tokens", f"{tk.total_tokens_used:,}")
+        with tc3:
+            st.metric("Custo Estimado", f"${tk.total_cost_usd:.4f}")
+
+        st.divider()
+
+        for i, t in enumerate(reversed(traces)):
+            idx = len(traces) - i
+            with st.expander(f"#{idx} — {t['question'][:80]}", expanded=(i == 0)):
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Tempo", f"{t['total_duration_ms']:.0f}ms")
+                m2.metric("Tokens", f"{t['tokens']['total']:,}")
+                m3.metric("Custo", f"${t['estimated_cost_usd']:.4f}")
+                m4.metric("Modelo", t["model"])
+
+                if t["tool_calls"]:
+                    st.markdown("**Tools utilizadas:**")
+                    for tc in t["tool_calls"]:
+                        st.markdown(
+                            f"- `{tc['name']}` — input: `{tc['input'][:100]}` "
+                            f"→ output: `{tc['output'][:100]}…`"
+                        )
+                else:
+                    st.markdown("*Nenhuma tool utilizada (resposta direta do LLM)*")
+
+                st.markdown("**Breakdown de tokens:**")
+                st.markdown(
+                    f"- Prompt: {t['tokens']['prompt']:,} · "
+                    f"Completion: {t['tokens']['completion']:,}"
+                )

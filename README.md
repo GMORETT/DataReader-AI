@@ -1,4 +1,4 @@
-# Sales AI Agent
+# Data Reader AI Agent
 
 Agente de IA que analisa dados de vendas a partir de um arquivo CSV e responde perguntas em linguagem natural, utilizando **LangChain**, **LangGraph** e **OpenAI**.
 
@@ -23,8 +23,10 @@ sales-ai-agent/
 ├── api/
 │   ├── app.py               # FastAPI application factory
 │   └── routes.py            # REST endpoints (/chat, /analytics/*)
+├── observability/
+│   └── tracker.py           # QueryTracker – traces, tokens, custo por query
 ├── ui/
-│   └── streamlit_app.py     # Interface web Streamlit (chat + dashboard)
+│   └── streamlit_app.py     # Interface web Streamlit (chat + dashboard + traces)
 ├── sales.csv                # Dataset de vendas
 ├── requirements.txt
 ├── Dockerfile
@@ -42,6 +44,7 @@ sales-ai-agent/
 | **Pydantic Settings** | Configuração type-safe via env vars, ideal para containers |
 | **Colunas derivadas** | `actual_revenue`, `quantity_diff`, etc. pré-computadas no load para performance |
 | **Separação de camadas** | Services ↔ Agent ↔ API desacoplados para testabilidade |
+| **Observabilidade** | Trace completo por query: tools usadas, tokens, tempo, custo estimado |
 
 ---
 
@@ -185,6 +188,71 @@ O agente possui **13 ferramentas** disponíveis:
 - "Mostre o top 5 produtos por receita"
 - "Qual o nível de serviço médio por warehouse?"
 - "Compare as vendas do primeiro e segundo semestre de 2012"
+
+---
+
+## Observabilidade
+
+Cada interação com o agente gera um **trace** completo com:
+
+| Dado | Descrição |
+|------|-----------|
+| **Tools chamadas** | Nome, input e output de cada ferramenta utilizada |
+| **Tokens** | Prompt tokens + completion tokens por chamada |
+| **Tempo** | Wall-clock time total da query |
+| **Custo estimado** | Estimativa em USD baseada no pricing do modelo |
+| **Passos do agente** | Quantas iterações ReAct o agente executou |
+
+### Onde visualizar
+
+- **Streamlit** → aba "Traces" com detalhes de cada query + resumo da sessão na sidebar
+- **CLI** → trace resumido abaixo de cada resposta (tempo, tools, tokens, custo)
+- **API** → campo `metadata` na response do `/chat` com o trace completo em JSON
+
+### Exemplo de response da API com trace
+
+```json
+{
+  "answer": "O produto mais vendido foi...",
+  "conversation_id": "abc-123",
+  "metadata": {
+    "total_duration_ms": 3200,
+    "tokens": { "prompt": 1500, "completion": 200, "total": 1700 },
+    "estimated_cost_usd": 0.000345,
+    "tool_calls": [
+      { "name": "top_products_by_quantity", "input": "10", "duration_ms": 50 }
+    ]
+  }
+}
+```
+
+---
+
+## Testes
+
+O projeto possui uma suite de testes automatizados com **pytest**.
+
+### Executar testes unitários (sem LLM, sem custo)
+
+```bash
+pytest
+```
+
+### Executar testes de integração (usa LLM, consome tokens)
+
+```bash
+pytest -m integration
+```
+
+### Estrutura dos testes
+
+| Arquivo | O que testa | LLM? |
+|---------|-------------|------|
+| `test_data_loader.py` | Carregamento e limpeza do CSV, colunas derivadas, erros | Não |
+| `test_analytics.py` | Todos os métodos do AnalyticsService com dados controlados | Não |
+| `test_tools.py` | 13 LangChain tools: formato JSON, parâmetros, python_repl | Não |
+| `test_api.py` | Endpoints FastAPI com agent mockado | Não |
+| `test_agent.py` | Integração real com LLM (memória, traces, tool usage) | Sim |
 
 ---
 

@@ -90,6 +90,15 @@ def run_cli() -> None:
 
         console.print()
         console.print(Panel(Markdown(result["answer"]), title="🤖 Agente", border_style="green"))
+
+        trace = result["trace"]
+        tools_used = ", ".join(tc.name for tc in trace.tool_calls) or "nenhuma"
+        console.print(
+            f"  [dim]⏱ {trace.total_duration_ms:.0f}ms · "
+            f"🔧 {tools_used} · "
+            f"📊 {trace.total_tokens:,} tokens · "
+            f"💰 ${trace.estimated_cost_usd:.4f}[/dim]"
+        )
         console.print()
 
 

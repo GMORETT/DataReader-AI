@@ -24,6 +24,13 @@ def _json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, default=str)
 
 
+def _safe_int(value: str, default: int = 10) -> int:
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def build_tools(df: pd.DataFrame, analytics: AnalyticsService) -> list:
     """Build the full list of LangChain tools the agent can use."""
 
@@ -37,25 +44,25 @@ def build_tools(df: pd.DataFrame, analytics: AnalyticsService) -> list:
     def top_products_by_quantity(n: str = "10") -> str:
         """Return the top N products ranked by total actual quantity sold.
         Input: number of results (default 10)."""
-        return _json(analytics.top_products_by_quantity(int(n)))
+        return _json(analytics.top_products_by_quantity(_safe_int(n)))
 
     @tool
     def top_locations_by_quantity(n: str = "10") -> str:
         """Return the top N locations ranked by total actual quantity sold.
         Input: number of results (default 10)."""
-        return _json(analytics.top_locations_by_quantity(int(n)))
+        return _json(analytics.top_locations_by_quantity(_safe_int(n)))
 
     @tool
     def top_products_by_revenue(n: str = "10") -> str:
         """Return the top N products ranked by total actual revenue.
         Input: number of results (default 10)."""
-        return _json(analytics.top_products_by_revenue(int(n)))
+        return _json(analytics.top_products_by_revenue(_safe_int(n)))
 
     @tool
     def top_locations_by_revenue(n: str = "10") -> str:
         """Return the top N locations ranked by total actual revenue.
         Input: number of results (default 10)."""
-        return _json(analytics.top_locations_by_revenue(int(n)))
+        return _json(analytics.top_locations_by_revenue(_safe_int(n)))
 
     @tool
     def total_sales_in_period(period: str = "") -> str:
@@ -83,7 +90,7 @@ def build_tools(df: pd.DataFrame, analytics: AnalyticsService) -> list:
     def planned_vs_actual_by_product(n: str = "10") -> str:
         """Show the top N products with the largest difference between planned
         and actual quantities.  Input: number of results (default 10)."""
-        return _json(analytics.planned_vs_actual_by_product(int(n)))
+        return _json(analytics.planned_vs_actual_by_product(_safe_int(n)))
 
     @tool
     def promotion_impact(query: str = "") -> str:

@@ -1,12 +1,13 @@
 """High-level Sales Agent facade.
 
 Creates and manages the LangChain ReAct agent backed by custom tools and an
-optional pandas REPL.
+optional pandas REPL.  Includes observability via QueryTracker.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -17,6 +18,7 @@ from langchain_openai import ChatOpenAI
 from agent.prompts import SYSTEM_PROMPT
 from agent.tools import build_tools
 from config.settings import Settings, get_settings
+from observability.tracker import QueryTracker, QueryTrace
 from services.analytics import AnalyticsService
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ class SalesAgent:
             max_tokens=self._settings.max_tokens,
         )
         self._conversations: dict[str, list] = {}
+        self._tracker = QueryTracker(model_name=self._settings.openai_model)
         self._agent = self._build_agent()
 
     def _build_agent(self):
@@ -67,9 +70,11 @@ class SalesAgent:
 
         history.append(HumanMessage(content=question))
 
+        start = time.perf_counter()
         result = self._agent.invoke(
             {"messages": history},
         )
+        wall_time_ms = (time.perf_counter() - start) * 1000
 
         response_messages = result["messages"]
         ai_answer = ""
@@ -78,12 +83,24 @@ class SalesAgent:
                 ai_answer = msg.content
                 break
 
+        trace = self._tracker.trace_from_messages(
+            question=question,
+            answer=ai_answer,
+            messages=response_messages,
+            wall_time_ms=wall_time_ms,
+        )
+
         history.append(AIMessage(content=ai_answer))
 
         return {
             "answer": ai_answer,
             "conversation_id": cid,
+            "trace": trace,
         }
+
+    @property
+    def tracker(self) -> QueryTracker:
+        return self._tracker
 
     @property
     def analytics(self) -> AnalyticsService:

@@ -30,9 +30,11 @@ async def chat(request: ChatRequest):
             question=request.question,
             conversation_id=request.conversation_id,
         )
+        trace = result["trace"]
         return ChatResponse(
             answer=result["answer"],
             conversation_id=result["conversation_id"],
+            metadata=trace.to_dict(),
         )
     except Exception as e:
         logger.exception("Error processing question")
