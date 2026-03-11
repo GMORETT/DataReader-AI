@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ToolCall:
     name: str
+    origin: str
     input: str
     output: str
     duration_ms: float
@@ -37,6 +38,7 @@ class QueryTrace:
     total_tokens: int = 0
     tool_calls: list[ToolCall] = field(default_factory=list)
     agent_steps: int = 0
+    dataset_id: str = ""
 
     @property
     def estimated_cost_usd(self) -> float:
@@ -57,9 +59,11 @@ class QueryTrace:
             },
             "estimated_cost_usd": round(self.estimated_cost_usd, 6),
             "agent_steps": self.agent_steps,
+            "dataset_id": self.dataset_id,
             "tool_calls": [
                 {
                     "name": tc.name,
+                    "origin": tc.origin,
                     "input": tc.input[:200],
                     "output": tc.output[:200],
                     "duration_ms": round(tc.duration_ms, 1),
@@ -82,18 +86,23 @@ class QueryTracker:
         answer: str,
         messages: list,
         wall_time_ms: float,
+        dataset_id: str = "",
+        tool_origin_map: dict[str, str] | None = None,
     ) -> QueryTrace:
         trace = QueryTrace(
             question=question,
             answer=answer,
             model=self._model_name,
             total_duration_ms=wall_time_ms,
+            dataset_id=dataset_id,
         )
 
         tool_calls: list[ToolCall] = []
         prompt_tokens = 0
         completion_tokens = 0
         steps = 0
+
+        origin_map = tool_origin_map or {}
 
         for msg in messages:
             if isinstance(msg, AIMessage):
@@ -106,6 +115,7 @@ class QueryTracker:
                     for tc in msg.tool_calls:
                         tool_calls.append(ToolCall(
                             name=tc["name"],
+                            origin=origin_map.get(tc["name"], "unknown"),
                             input=str(tc.get("args", "")),
                             output="",
                             duration_ms=0.0,

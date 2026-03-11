@@ -14,19 +14,24 @@ sales-ai-agent/
 ├── models/
 │   └── schemas.py           # Pydantic data models
 ├── services/
-│   ├── data_loader.py       # CSV → pandas DataFrame (validado e enriquecido)
+│   ├── data_loader.py       # Loader sales + loader genérico
+│   ├── dataset_profiler.py  # DatasetProfile e inferência de schema
 │   └── analytics.py         # Serviço de analytics pré-construído
 ├── agent/
-│   ├── csv_agent.py         # SalesAgent – facade do agente LangChain/LangGraph
-│   ├── tools.py             # LangChain Tools (analytics + Python REPL)
-│   └── prompts.py           # System prompts
+│   ├── csv_agent.py         # SalesAgent runtime (preset + dynamic hybrid)
+│   ├── tools.py             # Tools fixas do sales preset
+│   ├── generic_tools.py     # Tools genéricas para qualquer dataset
+│   ├── dynamic_tools.py     # Tools específicas inferidas por profiling
+│   ├── tool_builder.py      # Composição híbrida de tools
+│   ├── prompt_builder.py    # Prompt dinâmico baseado em schema
+│   └── prompts.py           # System prompt do modo sales preset
 ├── api/
 │   ├── app.py               # FastAPI application factory
 │   └── routes.py            # REST endpoints (/chat, /analytics/*)
 ├── observability/
 │   └── tracker.py           # QueryTracker – traces, tokens, custo por query
 ├── ui/
-│   └── streamlit_app.py     # Interface web Streamlit (chat + dashboard + traces)
+│   └── streamlit_app.py     # Streamlit com SalesPreset + DynamicHybrid
 ├── sales.csv                # Dataset de vendas
 ├── requirements.txt
 ├── Dockerfile
@@ -45,6 +50,7 @@ sales-ai-agent/
 | **Colunas derivadas** | `actual_revenue`, `quantity_diff`, etc. pré-computadas no load para performance |
 | **Separação de camadas** | Services ↔ Agent ↔ API desacoplados para testabilidade |
 | **Observabilidade** | Trace completo por query: tools usadas, tokens, tempo, custo estimado |
+| **Modo híbrido dinâmico** | Upload de CSV + tools genéricas e específicas inferidas automaticamente |
 
 ---
 
@@ -94,6 +100,14 @@ python main.py --api
 python main.py --streamlit
 # Acesse: http://localhost:8501
 ```
+
+### Modos no Streamlit
+
+- **SalesPreset**: usa `sales.csv` e tools especializadas de vendas.
+- **DynamicHybrid**: permite upload de qualquer CSV e cria:
+  - tools genéricas (`aggregate`, `top_n`, `describe`, `filter`)
+  - tools dinâmicas inferidas do schema (ranking por categoria, médias por grupo, trends temporais)
+  - fallback `python_repl`
 
 ---
 
@@ -202,10 +216,12 @@ Cada interação com o agente gera um **trace** completo com:
 | **Tempo** | Wall-clock time total da query |
 | **Custo estimado** | Estimativa em USD baseada no pricing do modelo |
 | **Passos do agente** | Quantas iterações ReAct o agente executou |
+| **Origem da tool** | Se cada tool foi `sales_specific`, `dynamic`, `generic` ou `python_repl` |
+| **Dataset ID** | Hash curto do dataset ativo para rastrear sessões multi-dataset |
 
 ### Onde visualizar
 
-- **Streamlit** → aba "Traces" com detalhes de cada query + resumo da sessão na sidebar
+- **Streamlit** → aba "Tracking" com detalhes de cada query + resumo da sessão na sidebar
 - **CLI** → trace resumido abaixo de cada resposta (tempo, tools, tokens, custo)
 - **API** → campo `metadata` na response do `/chat` com o trace completo em JSON
 
@@ -251,6 +267,10 @@ pytest -m integration
 | `test_data_loader.py` | Carregamento e limpeza do CSV, colunas derivadas, erros | Não |
 | `test_analytics.py` | Todos os métodos do AnalyticsService com dados controlados | Não |
 | `test_tools.py` | 13 LangChain tools: formato JSON, parâmetros, python_repl | Não |
+| `test_dataset_profiler.py` | Profiling de schema (tipos, colunas, dataset_id) | Não |
+| `test_generic_tools.py` | Tools genéricas para datasets arbitrários | Não |
+| `test_dynamic_tools.py` | Geração de tools dinâmicas por dataset | Não |
+| `test_streamlit_dynamic_mode.py` | Fluxo base do modo dinâmico (loader + criação do agente) | Não |
 | `test_api.py` | Endpoints FastAPI com agent mockado | Não |
 | `test_agent.py` | Integração real com LLM (memória, traces, tool usage) | Sim |
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from io import BytesIO
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,6 +10,12 @@ import pandas as pd
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _detect_separator(sample_text: str) -> str:
+    candidates = [";", ",", "\t", "|"]
+    scores = {sep: sample_text.count(sep) for sep in candidates}
+    return max(scores, key=scores.get) if sample_text else ","
 
 
 def _clean_dataframe(df: pd.DataFrame, date_format: str) -> pd.DataFrame:
@@ -38,6 +45,57 @@ def _clean_dataframe(df: pd.DataFrame, date_format: str) -> pd.DataFrame:
     df["quarter"] = df["date"].dt.quarter
 
     logger.info("DataFrame loaded: %d rows × %d columns", len(df), len(df.columns))
+    return df
+
+
+def _infer_datetime_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for col in df.columns:
+        if pd.api.types.is_object_dtype(df[col]):
+            converted = pd.to_datetime(df[col], errors="coerce", dayfirst=True, format="mixed")
+            # Convert when we have enough parseable values to avoid accidental coercion.
+            if converted.notna().mean() >= 0.8:
+                df[col] = converted
+    return df
+
+
+def load_csv_generic(path: Path, encoding: str = "utf-8") -> pd.DataFrame:
+    """Load any CSV with best-effort type inference (no sales-specific logic)."""
+    if not path.exists():
+        raise FileNotFoundError(f"CSV file not found: {path}")
+
+    sample = path.read_text(encoding=encoding, errors="ignore")[:4096]
+    sep = _detect_separator(sample)
+    df = pd.read_csv(path, sep=sep, encoding=encoding, low_memory=False)
+    df.columns = df.columns.str.strip().str.lower()
+
+    # Generic numeric/date inference keeps the dynamic mode dataset-agnostic.
+    for col in df.columns:
+        if pd.api.types.is_object_dtype(df[col]):
+            numeric = pd.to_numeric(df[col], errors="coerce")
+            if numeric.notna().mean() >= 0.8:
+                df[col] = numeric
+
+    df = _infer_datetime_columns(df)
+    return df
+
+
+def load_csv_generic_from_bytes(file_bytes: bytes, filename: str = "uploaded.csv") -> pd.DataFrame:
+    """Load uploaded CSV bytes for Streamlit dynamic mode."""
+    if not file_bytes:
+        raise ValueError(f"Uploaded file {filename} is empty")
+
+    head = file_bytes[:4096].decode("utf-8", errors="ignore")
+    sep = _detect_separator(head)
+    df = pd.read_csv(BytesIO(file_bytes), sep=sep, encoding="utf-8", low_memory=False)
+    df.columns = df.columns.str.strip().str.lower()
+
+    for col in df.columns:
+        if pd.api.types.is_object_dtype(df[col]):
+            numeric = pd.to_numeric(df[col], errors="coerce")
+            if numeric.notna().mean() >= 0.8:
+                df[col] = numeric
+
+    df = _infer_datetime_columns(df)
     return df
 
 
